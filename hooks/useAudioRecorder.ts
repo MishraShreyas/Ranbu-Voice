@@ -1,7 +1,6 @@
 "use client";
 
-import { transcribe } from "@/lib/groq";
-import Groq from "groq-sdk";
+import { GroqManager } from "@/lib/groq";
 import { useEffect, useRef, useState } from "react";
 
 const PLAY_RECORDED_AUDIO = false;
@@ -10,7 +9,7 @@ interface UseAudioRecorderProps {
     onTranscribe: (transcription: string) => void;
     onRecordingStart: () => void;
     onRecordingEnd: () => void;
-    groq: Groq;
+    groq: GroqManager;
 }
 
 export default function useAudioRecorder({
@@ -126,7 +125,7 @@ export default function useAudioRecorder({
             }
 
             console.log(`Audio chunk size: ${chunk.size} bytes`);
-            transcription += (await transcribe(chunk, groq)).text;
+            transcription += (await groq.transcribe(chunk)).text;
         }
 
         // We trim by default to avoid problematic leading/trailing whitespace

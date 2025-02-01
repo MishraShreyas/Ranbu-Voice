@@ -1,51 +1,34 @@
 "use client";
 
-import Groq from "groq-sdk";
-import { CartesiaClient } from "@cartesia/cartesia-js";
-import React, { useEffect, useRef, useState, useCallback } from "react";
-import Image from "next/image";
-import useTTS from "@/hooks/useTTS";
+// import Groq from "groq-sdk";
+import React, { useEffect, useState, useCallback } from "react";
 import useAudioRecorder from "@/hooks/useAudioRecorder";
-import { streamCompletion } from "@/lib/groq";
 import AudioAnimation from "@/components/AudioAnimation";
+import { AIProvider, useAI } from "@/components/AISettings/AIContext";
+import ChatHistory from "@/components/ChatHistory";
+import { Toggle } from "@/components/ui/toggle";
+import { MessageCircle, Mic, Settings } from "lucide-react";
+import AIConfig from "@/components/AISettings/AIConfig";
 
-const GROQ_ORANGE = "#F55036";
-const GRAY_COLOR = "#30323E";
+// const toolHandlers: { [key: string]: (...args: any[]) => any } = {
 
-function App({
-    cartesiaApiKey,
-    groqApiKey,
-}: {
-    cartesiaApiKey: string;
-    groqApiKey: string;
-}) {
-    const cartesia = cartesiaApiKey
-        ? new CartesiaClient({
-            apiKey: cartesiaApiKey,
-        })
-        : null;
+// }
 
-    const groq = new Groq({
-        apiKey: groqApiKey,
-        dangerouslyAllowBrowser: true,
-    });
-
-    const historyRef = useRef<Groq.Chat.ChatCompletionMessageParam[]>([]);
-    const [historyLastUpdate, setHistoryLastUpdate] = useState(new Date());
-    const { speak, isPlaying } = useTTS(cartesia);
+function App() {
+    const { cartesia, groq, model, voiceModel, history, prompt } = useAI();
 
     const { isRecording, startRecording, stopRecording, volume } =
         useAudioRecorder({
             onTranscribe: async (transcription: string) => {
-                historyRef.current = [
-                    ...historyRef.current,
+                history.current = [
+                    ...history.current,
                     { role: "user", content: transcription },
                 ];
 
                 await triggerCompletionFlow();
             },
             onRecordingStart: () => {
-                historyRef.current = [...historyRef.current];
+                history.current = [...history.current];
             },
             onRecordingEnd: () => {
                 // No additional actions needed for now
@@ -53,11 +36,20 @@ function App({
             groq,
         });
 
-    const [isShowingMessages, setIsShowingMessages] = useState(cartesia === null);
+    const [showMessages, setShowMessages] = useState(false);
+    const [showConfig, setShowConfig] = useState(false);
 
-    const handleClick = () => {
-        setIsShowingMessages(!isShowingMessages);
+    const [isPlaying, setIsPlaying] = useState(false);
+
+    const handleShowMessages = (press: boolean) => {
+        setShowMessages(press);
+        setShowConfig(false);
     };
+
+    const handleShowConfig = (press: boolean) => {
+        setShowConfig(press);
+        setShowMessages(false);
+    }
 
     const handleMicrophonePress = () => {
         startRecording();
@@ -69,27 +61,33 @@ function App({
 
     const triggerCompletionFlow = async () => {
 
-        const { contentBuffer: response, toolCalls } = await streamCompletion(
-            historyRef.current,
-            groq
+        const { contentBuffer: response } = await groq.streamCompletion(
+            history.current,
+            model,
+            prompt
         );
-        setHistoryLastUpdate(new Date());
 
         // In the completion flow we also handle 
         // calling the generated toolCalls in case there are any, which can recursively
         // call triggerCompletionFlow in case
         // more toolCalls are generated.
         // if (toolCalls.length > 0) {
-        //   await handleToolCalls(toolCalls);
+        //     await handleToolCalls(toolCalls);
         // }
 
         if (response.length > 0) {
-            setHistoryLastUpdate(new Date());
-            historyRef.current = [
-                ...historyRef.current,
+            history.current = [
+                ...history.current,
                 { role: "assistant", content: response },
             ];
-            await speak(response);
+
+            const src = await cartesia.getSpeakSource(response, voiceModel);
+
+            if (src) {
+                setIsPlaying(true);
+                await cartesia.startPlayer(src);
+                setIsPlaying(false);
+            }
         }
     };
 
@@ -121,74 +119,72 @@ function App({
         return () => observer.disconnect();
     }, []);
 
-    //   const handleToolCalls = async (
+    // const handleToolCalls = async (
     //     toolCalls: Groq.Chat.ChatCompletionMessageToolCall[]
-    //   ) => {
+    // ) => {
     //     // Assumed only called with toolCalls > 0
     //     if (toolCalls.length == 0) {
-    //       throw new Error("only call handleToolCalls with toolCalls > 0");
+    //         throw new Error("only call handleToolCalls with toolCalls > 0");
     //     }
 
-    //     historyRef.current = [
-    //       ...historyRef.current,
-    //       { role: "assistant", tool_calls: toolCalls },
+    //     history.current = [
+    //         ...history.current,
+    //         { role: "assistant", tool_calls: toolCalls },
     //     ];
 
     //     for (const toolCall of toolCalls) {
-    //       const { function: toolFunction } = toolCall;
-    //       if (toolFunction && toolHandlers[toolFunction.name]) {
-    //         const toolResponse = await toolHandlers[toolFunction.name](
-    //           JSON.parse(toolFunction.arguments)
-    //         );
+    //         const { function: toolFunction } = toolCall;
+    //         if (toolFunction && toolHandlers[toolFunction.name]) {
+    //             const toolResponse = await toolHandlers[toolFunction.name](
+    //                 JSON.parse(toolFunction.arguments)
+    //             );
 
-    //         historyRef.current = [
-    //           ...historyRef.current,
-    //           { role: "tool", content: toolResponse, tool_call_id: toolCall.id },
-    //         ];
-    //       }
+    //             history.current = [
+    //                 ...history.current,
+    //                 { role: "tool", content: toolResponse, tool_call_id: toolCall.id },
+    //             ];
+    //         }
     //     }
     //     await triggerCompletionFlow();
-    //   };
+    // };
 
     return (
         <div className="flex h-full flex-col">
             <div className="p-4">
-                <Image width={80} height={40} src="groq.svg" alt="groq" />
+                <h1 className="text-3xl font-bold text-center">RANBU</h1>
             </div>
-            {!isShowingMessages && (
+            {!showMessages && !showConfig && (
                 <div className="flex justify-center items-center h-full absolute top-0 left-0 w-full">
                     <AudioAnimation playing={isPlaying} />
                 </div>
             )}
             <div id="chat-container" className="p-2 flex-grow overflow-x-auto">
-                <div
-                    className="fixed bottom-4 left-4 p-2 rounded-full cursor-pointer select-none"
-                    style={{
-                        backgroundColor: isShowingMessages ? GROQ_ORANGE : GRAY_COLOR,
-                    }}
-                    onClick={handleClick}
-                >
-                    <Image
-                        src={
-                            isShowingMessages ? "chat-bubble-white.svg" : "chat-bubble.svg"
-                        }
-                        alt="chat bubble"
-                        width={20}
-                        height={20}
-                    />
+                <div className="flex fixed bottom-4 left-4 gap-2">
+                    <Toggle
+                        variant='outline'
+                        onPressedChange={handleShowMessages}
+                        pressed={showMessages}
+                        className="group"
+                    >
+                        <MessageCircle className={`text-primary group-data-[state=on]:text-orange-800`} />
+                    </Toggle>
+                    <Toggle
+                        variant='outline'
+                        onPressedChange={handleShowConfig}
+                        pressed={showConfig}
+                        className="group"
+                    >
+                        <Settings className={`text-primary group-data-[state=on]:text-orange-800`} />
+                    </Toggle>
                 </div>
                 <div className="fixed bottom-4 right-4 select-none cursor-pointer">
                     <div
                         id="microphone-button"
+                        data-recording={isRecording}
                         className={`p-6 rounded-full ${isRecording ? "recording-animation" : ""
-                            }`}
+                            } bg-foreground data-[recording=true]:bg-primary transition-all duration-200 ease-in-out data-[recording=true]:shadow-lg`}
                         style={{
-                            backgroundColor: isRecording ? GROQ_ORANGE : GRAY_COLOR,
-                            transition: "transform 0.05s ease",
                             transform: `scale(${1 + volume / 100 + (isRecording ? 0.1 : 0)})`,
-                            boxShadow: isRecording
-                                ? "0 0 39px 37px rgba(245, 80, 54, 0.7)"
-                                : "none",
                         }}
                         onMouseDown={handleMicrophonePress}
                         onMouseUp={handleMicrophoneRelease}
@@ -200,52 +196,14 @@ function App({
                                 transform: `scale(${1 / (1 + volume / 100)})`,
                             }}
                         >
-                            <Image
-                                src={isRecording ? "microphone-white.svg" : "microphone.svg"}
-                                className="pointer-events-none"
-                                alt="microphone"
-                                width={30}
-                                height={30}
-                            />
+                            <Mic className="pointer-events-none size-8 text-orange-800" />
                         </div>
                     </div>
                 </div>
 
-                {isShowingMessages && (
-                    <>
-                        <div className="flex flex-col pb-24">
-                            {historyRef.current.slice().map((message: any, index) => (
-                                <div
-                                    key={index}
-                                    className={`p-2 mb-4 rounded-lg ${message.role === "user"
-                                        ? "message-user self-end"
-                                        : "message-assistant self-start"
-                                        }`}
-                                >
-                                    {message.role === "tool" ? (
-                                        <pre>
-                                            {JSON.stringify(JSON.parse(message.content), null, 2)}
-                                        </pre>
-                                    ) : message.role === "assistant" && message.tool_calls ? (
-                                        <pre>{JSON.stringify(message.tool_calls, null, 2)}</pre>
-                                    ) : (
-                                        message.content
-                                    )}
-                                    {index === historyRef.current.length - 1 && (
-                                        <div className="text-xs text-gray-500 mt-1">
-                                            {historyLastUpdate.toLocaleTimeString()}
-                                        </div>
-                                    )}
-                                </div>
-                            ))}
-                        </div>
-                        {historyRef.current.length == 0 && (
-                            <div className="flex justify-center items-center">
-                                <p>Start a conversation by asking a question.</p>
-                            </div>
-                        )}
-                    </>
-                )}
+                {showMessages && <ChatHistory />}
+
+                {showConfig && <AIConfig />}
             </div>
         </div>
     );
@@ -253,8 +211,8 @@ function App({
 
 export default function Home() {
     useEffect(() => {
-        const touchHandler = (ev: any) => {
-            let currentElement = ev.target;
+        const touchHandler = (ev: TouchEvent | MouseEvent) => {
+            let currentElement = ev.target as HTMLElement | null;
             while (currentElement) {
                 if (currentElement.id === "microphone-button") {
                     ev.preventDefault();
@@ -278,6 +236,8 @@ export default function Home() {
     }, []);
 
     return (
-        <App cartesiaApiKey={process.env.NEXT_PUBLIC_VOICE_API_KEY as string} groqApiKey={process.env.NEXT_PUBLIC_CHAT_API_KEY as string} />
+        <AIProvider>
+            <App />
+        </AIProvider>
     );
 }
